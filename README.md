@@ -1,18 +1,53 @@
 # Terraform sandbox
 
-A learning repo: a small Ubuntu VM in Azure (`australiaeast`), managed by Terraform and
-deployed through GitHub Actions with a **plan on PR, apply on merge** workflow.
+A personal playground for learning Terraform on Azure. Anything goes, as long as it lives in
+**one resource group, `terraform-sandbox`** (australiaeast). The pipeline's identity has no
+permissions anywhere else in the subscription, so experiments can't touch other workloads.
 
-Everything is confined to **one resource group, `terraform-sandbox`**. The pipeline's identity
-has no permissions anywhere else in the subscription.
+Changes are deployed through GitHub Actions with a **plan on PR, apply on merge** workflow:
 
 ```
 feature branch ──► Pull Request ──► "Plan" job runs, posts the plan as a PR comment
                                         │  (you review it)
                                         ▼
                                    Merge to main ──► "Apply" job runs terraform apply
-                                                     (GitHub environment: terraform-sandbox)
+                                                     (GitHub environment: terraform-sandbox,
+                                                      deployable from main only)
 ```
+
+## Day-to-day workflow
+
+1. **Branch** off an up-to-date `main`:
+   ```powershell
+   git switch main; git pull
+   git switch -c try-storage-account
+   ```
+2. **Write Terraform** in `infra/`. Every `.tf` file in that folder is read together, so split
+   it however you like (`network.tf`, `storage.tf`, ...).
+3. **Plan locally** to check your work (see [Working locally](#working-locally)):
+   `terraform fmt`, `terraform validate`, `terraform plan`.
+4. **Open a PR.** The Plan job comments exactly what will be created, changed or destroyed.
+5. **Merge.** The Apply job makes it real.
+
+To **remove** something, delete it from the code and go through the same PR → merge flow.
+The plan shows it as `destroy`.
+
+## Sandbox rules
+
+The pipeline runs as SPN `github-terraform-sandbox` with **Contributor on `terraform-sandbox`
+only**. Inside the RG it can create almost anything. Some things are out of reach by design:
+
+| You want to... | What to do |
+|---|---|
+| Create a resource | Put it in the existing RG: `resource_group_name = data.azurerm_resource_group.main.name`, `location = data.azurerm_resource_group.main.location` |
+| Create another resource group | Not possible (needs subscription rights). Use the one RG. |
+| Create role assignments / Key Vault access for an identity | Contributor can't assign roles. Do it manually or grant the SPN *Role Based Access Control Administrator* on the RG. |
+| Use a new kind of resource and get `MissingSubscriptionRegistration` | Add its provider (e.g. `Microsoft.Web`) to `$resourceProviders` in `bootstrap/bootstrap.ps1` and re-run it. |
+| Pass a value into Terraform | Non-secret: `infra/terraform.tfvars`. Personal/secret: a GitHub variable or secret, mapped to `TF_VAR_<name>` in the workflow `env:` block, plus a matching `variable` in `variables.tf`. |
+| Work with Entra ID (app registrations, groups) | Out of scope for this SPN. |
+
+**Cost:** it's your Pay-As-You-Go subscription. Keep SKUs small, give VMs an auto-shutdown
+schedule, and remove experiments when you're done with them.
 
 ## Coming from Bicep
 
@@ -20,114 +55,96 @@ feature branch ──► Pull Request ──► "Plan" job runs, posts the plan 
 |---|---|
 | `az deployment group create -g terraform-sandbox` | `terraform apply` (the code deploys into the RG) |
 | `what-if` | `terraform plan`. Unlike what-if, it's exact, because Terraform compares against its state |
-| `existing` keyword | `data "azurerm_resource_group" "main"` in `main.tf` |
+| `existing` keyword | `data "..."` blocks, e.g. `data "azurerm_resource_group" "main"` |
 | `.bicepparam` / parameters file | `terraform.tfvars` + `TF_VAR_*` environment variables |
-| SPN with Contributor on the RG | Same: `github-terraform-sandbox`, Contributor on `terraform-sandbox` only |
-| `azure/login` with OIDC | Same federated credentials; the provider reads `ARM_CLIENT_ID` etc. directly |
-| Deployment history in the portal | **State file** (see below) |
+| Modules | Terraform modules (a folder of `.tf` files called with a `module` block) |
+| SPN + OIDC via `azure/login` | Same federated credentials; the provider reads `ARM_CLIENT_ID` etc. directly |
+| Deployment history | **State file** (see below) |
 | Incremental vs Complete mode | Terraform behaves like "complete" **for resources it created**. Remove something from code and it's deleted. It never touches resources it didn't create. |
 
 **State** is the big new concept. Terraform keeps a JSON file recording every resource it
-manages, and each plan compares *code ↔ state ↔ real Azure*. It's stored in a storage account
-inside `terraform-sandbox`, with a delete lock so the pipeline can't remove it.
+manages, and each plan compares *code ↔ state ↔ real Azure*. It's stored in storage account
+`sttfstate8fgromb1` inside the RG, with a `CanNotDelete` lock so the pipeline can't remove it.
+Changes made by hand in the portal show up as *drift* in the next plan, and Terraform will
+try to undo them.
 
-## Layout
+## Repo layout
 
 | Path | What it is |
 |---|---|
-| `infra/` | The Terraform code (VNet, NSG, public IP, NIC, VM, auto-shutdown) |
-| `infra/terraform.tfvars` | Non-secret settings (RG name, name prefix) |
-| `infra/backend.hcl` | Where state is stored. Generated by the bootstrap script |
-| `bootstrap/bootstrap.ps1` | One-time setup, run by you as subscription Owner |
-| `.github/workflows/terraform.yml` | The plan/apply pipeline |
+| `infra/` | All Terraform code. One root module and one state file |
+| `infra/versions.tf`, `providers.tf` | Terraform/provider versions and the azurerm provider config |
+| `infra/variables.tf`, `terraform.tfvars` | Input variables and their committed (non-secret) values |
+| `infra/backend.hcl` | Where state is stored. Generated by the bootstrap |
+| `infra/local.auto.tfvars` | Your personal values for local runs (gitignored; see the `.example`) |
+| `bootstrap/bootstrap.ps1` | One-time Azure + GitHub setup, run by you as subscription Owner |
+| `.github/workflows/terraform.yml` | The plan/apply pipeline. Only runs when `infra/` or the workflow changes |
 
-## What the bootstrap creates
+## What's deployed right now
 
-The pipeline's identity is deliberately limited, so anything that needs more than RG-level
-rights is done once by you:
-
-- Resource group `terraform-sandbox` (australiaeast)
-- Storage account `sttfstate<random>` in that RG for state, with a `CanNotDelete` lock
-- App registration / SPN `github-terraform-sandbox` with federated credentials for:
-  - `repo:iac-multitools/Terraform-sandbox:pull_request` (the plan job)
-  - `repo:iac-multitools/Terraform-sandbox:environment:terraform-sandbox` (the apply job)
-- Role assignments: SPN → **Contributor on the RG**. SPN and you → **Storage Blob Data Contributor** on the state account.
-- Registers the resource providers Terraform needs. The SPN can't, because that needs subscription scope.
-- GitHub environment `terraform-sandbox` and repo variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
-  `AZURE_SUBSCRIPTION_ID`, `ADMIN_SSH_PUBLIC_KEY`, `ALLOWED_SSH_CIDR`
-
-There are no client secrets anywhere.
-
-## One-time setup
-
-1. **Install the VS Code extensions** recommended for this repo. VS Code prompts you when you open the folder.
-2. **Create an SSH key** if you don't already have `~/.ssh/id_rsa.pub`:
-   ```powershell
-   ssh-keygen -t rsa -b 4096
-   ```
-3. **Log in** to Azure and GitHub:
-   ```powershell
-   az login
-   az account set --subscription "<your subscription name or id>"
-   gh auth login
-   ```
-4. **Run the bootstrap** from the repo root:
-   ```powershell
-   .\bootstrap\bootstrap.ps1
-   ```
-   If scripts are blocked, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` first.
-5. **Commit the base files directly to `main`.** The workflow and infra get added via your first PR:
-   ```powershell
-   git add .gitignore README.md .vscode bootstrap
-   git commit -m "Initial scaffolding"
-   git push -u origin main
-   ```
-
-## Your first PR
+A small Linux VM to learn the basics: VNet + subnet, an NSG allowing SSH only from
+`ALLOWED_SSH_CIDR`, a public IP, NIC, Ubuntu 24.04 `Standard_B1s`, and a daily auto-shutdown at
+19:00 UTC. Connect with:
 
 ```powershell
-git switch -c add-vm
-git add infra .github
-git commit -m "Add sandbox VM"
-git push -u origin add-vm
-gh pr create --fill
+ssh -i ~/.ssh/terraform-sandbox-ssh azureuser@<vm_public_ip>
 ```
 
-Open the PR on GitHub. The **Plan** job runs and comments the plan. It should show 8 resources
-to add. Merge the PR, and the **Apply** job creates everything. The job's `Outputs` step prints
-the `ssh` command for the VM.
+The IP is shown in the Apply job's **Outputs** step, or locally with `terraform output`.
 
-From then on, every change works the same way: branch → edit → PR → read the plan → merge.
+## Working locally
 
-### Recommended GitHub settings
-- **Settings → Branches → add rule for `main`**: require a pull request and require the
-  `Plan` check to pass.
-- **Settings → Environments → terraform-sandbox → Required reviewers**: add yourself to get a
-  manual "approve" button before each apply.
-
-## Working locally in VS Code
-
-You can run `plan` on your own machine to experiment before opening a PR:
+Run `plan` on your own machine to check your work before opening a PR:
 
 ```powershell
 cd infra
-copy local.auto.tfvars.example local.auto.tfvars   # then edit in your key + IP
-$env:ARM_SUBSCRIPTION_ID = "<subscription id>"     # the bootstrap prints this
-terraform init -backend-config=backend.hcl
-terraform fmt        # tidy formatting (CI fails if this isn't done)
+copy local.auto.tfvars.example local.auto.tfvars   # first time only; fill in your key + IP
+$env:ARM_SUBSCRIPTION_ID = "e0e05915-ccc9-4b6d-a340-25412753cd66"
+terraform init -backend-config=backend.hcl         # first time, or after provider changes
+terraform fmt                                       # CI fails if formatting is off
 terraform validate
 terraform plan
 ```
 
 Avoid `terraform apply` locally. Let the pipeline apply, so `main` always matches what's deployed.
-Note that locally you run as *yourself*, with your own (broader) permissions. The RG isolation
-only applies to the pipeline.
+Locally you run as *yourself*, with Owner rights, so the RG isolation only protects the pipeline.
+
+## Setup reference
+
+This is already done. Re-run it if you rebuild the sandbox, rotate your SSH key, or your home IP changes:
+
+```powershell
+az login
+gh auth login
+.\bootstrap\bootstrap.ps1 -SshPublicKeyPath ~\.ssh\terraform-sandbox-ssh.pub
+```
+
+The bootstrap is idempotent. It ensures:
+- The resource group `terraform-sandbox` and the locked state storage account inside it
+- The app registration / SPN `github-terraform-sandbox`, with federated credentials for PRs and the
+  `terraform-sandbox` environment, in both of GitHub's subject formats (`owner/repo` and `owner@id/repo@id`)
+- Role assignments: SPN → Contributor on the RG. SPN and you → Storage Blob Data Contributor on the state account.
+- The required resource provider registrations
+- The GitHub environment and the repo variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
+  `AZURE_SUBSCRIPTION_ID`, `ADMIN_SSH_PUBLIC_KEY`, `ALLOWED_SSH_CIDR`
+
+The `terraform-sandbox` environment is restricted to deployments from `main`. Required reviewers
+aren't available on a free private repo, so reviewing the plan comment before merging is the approval step.
+
+## Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| Plan fails at **Format check** | Run `terraform fmt -recursive` in `infra/` and push again |
+| `AADSTS700213: No matching federated identity record` | The OIDC subject GitHub sent doesn't match a federated credential. Compare it with `az ad app federated-credential list --id <client id>` |
+| `AuthorizationFailed` | The resource is outside `terraform-sandbox`, or it's an action Contributor can't do (see [Sandbox rules](#sandbox-rules)) |
+| `MissingSubscriptionRegistration` | Register the provider via the bootstrap |
+| `Error acquiring the state lock` | Another run is in progress. If one crashed, use `terraform force-unlock <lock id>` locally |
+| Can't SSH to the VM | Your home IP changed: re-run the bootstrap to update `ALLOWED_SSH_CIDR`, then re-run Apply. Or the VM is auto-shut down: start it in the portal. |
 
 ## Tearing it down
 
-The VM auto-shuts down at 19:00 UTC, but the disk and public IP still cost a little.
-
-- **Remove the VM etc.**: delete the resources from `infra/main.tf` in a PR and merge, or run
-  `terraform destroy` locally. Either way, the RG and state storage stay.
+- **Remove experiments**: delete them from the code and merge, or run `terraform destroy` locally.
+  The RG and state storage stay.
 - **Remove everything**: delete the lock on the state storage account, then delete the
   `terraform-sandbox` RG and the `github-terraform-sandbox` app registration.
