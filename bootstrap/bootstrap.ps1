@@ -25,7 +25,6 @@
 
 .EXAMPLE
   .\bootstrap\bootstrap.ps1
-  .\bootstrap\bootstrap.ps1 -SshPublicKeyPath ~\.ssh\azure_sandbox.pub
 #>
 param(
     [string]$Location = "australiaeast",
@@ -33,8 +32,7 @@ param(
     [string]$GitHubRepo = "iac-multitools/Terraform-sandbox",
     [string]$StateContainer = "tfstate",
     [string]$AppName = "github-terraform-sandbox",
-    [string]$EnvironmentName = "terraform-sandbox",
-    [string]$SshPublicKeyPath = "$HOME\.ssh\id_rsa.pub"
+    [string]$EnvironmentName = "terraform-sandbox"
 )
 
 $ErrorActionPreference = "Stop"
@@ -185,18 +183,6 @@ Invoke-Native gh api --method PUT "repos/$GitHubRepo/environments/$EnvironmentNa
 Invoke-Native gh variable set AZURE_CLIENT_ID --repo $GitHubRepo --body $appId
 Invoke-Native gh variable set AZURE_TENANT_ID --repo $GitHubRepo --body $tenantId
 Invoke-Native gh variable set AZURE_SUBSCRIPTION_ID --repo $GitHubRepo --body $subscriptionId
-
-if (Test-Path $SshPublicKeyPath) {
-    $pubKey = (Get-Content $SshPublicKeyPath -Raw).Trim()
-    Invoke-Native gh variable set ADMIN_SSH_PUBLIC_KEY --repo $GitHubRepo --body $pubKey
-    Write-Host "    ADMIN_SSH_PUBLIC_KEY set from $SshPublicKeyPath"
-} else {
-    Write-Warning "No SSH public key at $SshPublicKeyPath. Create one with: ssh-keygen -t rsa -b 4096   then re-run this script."
-}
-
-$myIp = (Invoke-RestMethod -Uri "https://api.ipify.org").Trim()
-Invoke-Native gh variable set ALLOWED_SSH_CIDR --repo $GitHubRepo --body "$myIp/32"
-Write-Host "    ALLOWED_SSH_CIDR set to $myIp/32"
 
 Write-Host ""
 Write-Host "Done. Commit infra/backend.hcl (it contains no secrets)." -ForegroundColor Green
