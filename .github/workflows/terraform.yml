@@ -1,0 +1,117 @@
+name: terraform
+
+# Plan on pull request -> review the plan in the PR comment -> merge -> apply.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform.yml"
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform.yml"
+  workflow_dispatch: # lets you run an apply manually from the Actions tab
+
+permissions:
+  id-token: write      # needed to get an OIDC token for Azure login (no stored secrets)
+  contents: read
+  pull-requests: write # needed to comment the plan on the PR
+
+# Never let two runs touch the state at the same time.
+concurrency:
+  group: terraform-state
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.11.2"
+  TF_IN_AUTOMATION: "true"
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  TF_VAR_admin_ssh_public_key: ${{ vars.ADMIN_SSH_PUBLIC_KEY }}
+  TF_VAR_allowed_ssh_cidr: ${{ vars.ALLOWED_SSH_CIDR }}
+
+defaults:
+  run:
+    working-directory: infra
+
+jobs:
+  plan:
+    name: Plan
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Format check
+        run: terraform fmt -check -recursive -diff
+
+      - name: Init
+        run: terraform init -input=false -backend-config=backend.hcl
+
+      - name: Validate
+        run: terraform validate
+
+      - name: Plan
+        run: |
+          terraform plan -input=false -no-color -out=tfplan
+          terraform show -no-color tfplan > plan.txt
+
+      - name: Comment plan on PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'infra/plan.txt';
+            let plan = fs.existsSync(path) ? fs.readFileSync(path, 'utf8') : 'Plan failed - see the workflow logs.';
+            const max = 60000;
+            if (plan.length > max) plan = plan.substring(0, max) + '\n... (truncated, see workflow logs)';
+            const body = [
+              `### Terraform plan for \`${context.sha.substring(0, 7)}\``,
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              '<details><summary>Show plan</summary>',
+              '',
+              '```hcl',
+              plan,
+              '```',
+              '</details>',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+  apply:
+    name: Apply
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # The Azure federated credential trusts this environment. You can also add
+    # "required reviewers" to it in GitHub settings for a manual approval gate.
+    environment: terraform-sandbox
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Init
+        run: terraform init -input=false -backend-config=backend.hcl
+
+      - name: Apply
+        run: terraform apply -input=false -auto-approve
+
+      - name: Outputs
+        run: terraform output
