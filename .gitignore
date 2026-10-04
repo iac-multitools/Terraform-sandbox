@@ -1,0 +1,25 @@
+# Terraform working files
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+plan.txt
+crash.log
+crash.*.log
+
+# Local-only variable files (may contain personal values)
+*.auto.tfvars
+!*.auto.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Never commit keys
+*.pem
+*.ppk
+*-ssh
+*-ssh.pub
+id_rsa*
+id_ed25519*

@@ -1,0 +1,7 @@
+{
+  "recommendations": [
+    "hashicorp.terraform",
+    "github.vscode-github-actions",
+    "ms-vscode.azurecli"
+  ]
+}
