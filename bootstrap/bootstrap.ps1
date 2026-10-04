@@ -47,6 +47,8 @@ $resourceProviders = @("Microsoft.Compute", "Microsoft.Network", "Microsoft.Stor
 # az/gh are native exes: PowerShell won't stop on their failures, so check exit codes.
 function Invoke-Native {
     $exe, $rest = $args
+    # Warnings on stderr aren't failures; the exit code is what matters.
+    $ErrorActionPreference = "Continue"
     $out = & $exe @rest
     if ($LASTEXITCODE -ne 0) { throw "Command failed: $exe $($rest -join ' ')" }
     return $out
@@ -112,9 +114,17 @@ Write-Host "    Client ID: $appId"
 # ---------- 4. Federated credentials (OIDC) ----------
 Write-Host "==> Ensuring federated credentials" -ForegroundColor Cyan
 $existingCreds = @(Invoke-Native az ad app federated-credential list --id $appId --query "[].name" -o tsv)
+# GitHub may present the repo either as "owner/repo" or, for newer repos, with immutable
+# numeric IDs ("owner@123/repo@456") in the OIDC token subject. Trust both forms.
+$owner, $repo = $GitHubRepo.Split("/")
+$ownerId = Invoke-Native gh api "repos/$GitHubRepo" --jq ".owner.id"
+$repoId = Invoke-Native gh api "repos/$GitHubRepo" --jq ".id"
+$repoWithIds = "$owner@$ownerId/$repo@$repoId"
 $creds = @(
     @{ name = "github-pull-request"; subject = "repo:${GitHubRepo}:pull_request" },
-    @{ name = "github-env-$EnvironmentName"; subject = "repo:${GitHubRepo}:environment:$EnvironmentName" }
+    @{ name = "github-env-$EnvironmentName"; subject = "repo:${GitHubRepo}:environment:$EnvironmentName" },
+    @{ name = "github-pull-request-ids"; subject = "repo:${repoWithIds}:pull_request" },
+    @{ name = "github-env-$EnvironmentName-ids"; subject = "repo:${repoWithIds}:environment:$EnvironmentName" }
 )
 foreach ($c in $creds) {
     if ($existingCreds -contains $c.name) { Write-Host "    $($c.name) already exists"; continue }
