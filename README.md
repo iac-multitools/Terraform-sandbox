@@ -82,13 +82,14 @@ try to undo them.
 
 ## What's deployed right now
 
-**Static website** ([infra/static-site.tf](infra/static-site.tf)): a storage account with static
-website hosting, serving [infra/site/index.html.tftpl](infra/site/index.html.tftpl). The URL is the
-`website_url` output, shown in the Apply job's **Outputs** step. Edit the template and open a PR to
-see an in-place update.
+Nothing yet, just the empty resource group and the state storage.
 
-Past experiments live in git history. For example, a Linux VM with networking and auto-shutdown was
-added in PR #1 and removed in PR #2. It's a good reference for a VM pattern.
+Past experiments live in git history and make good reference patterns:
+
+| Experiment | Added | Removed |
+|---|---|---|
+| Linux VM with networking and auto-shutdown | PR #1 | PR #2 |
+| Static website on a storage account (`random` provider, `templatefile()`) | PR #3 (edited in #4) | `feature/remove-static-site` PR |
 
 ## Working locally
 
