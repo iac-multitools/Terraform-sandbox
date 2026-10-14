@@ -58,12 +58,19 @@ and runs the same Build → Deploy commands as below.
 
 ```
 Tenant Root Group
-├── mg-landgate-sim      pacSelector "tenant"    stands in for the Landgate hierarchy
-│   └── Pay-As-You-Go subscription                 + hand-made "legacy" policies to export
-└── mg-epac-dev          pacSelector "epac-dev"  empty test hierarchy, as EPAC recommends
+├── Pay-As-You-Go subscription   NOT moved; it runs a production app
+├── mg-landgate-sim              pacSelector "tenant"    stands in for the Landgate hierarchy
+│                                                          + hand-made "legacy" policies to export
+└── mg-epac-dev                  pacSelector "epac-dev"  test hierarchy, as EPAC recommends
 ```
 
+**Light touch:** this tenant also hosts a production app, so both management groups are **empty**
+and every policy is **Audit only**. Policies assigned to an empty management group can't affect
+any resource. This test exercises everything in EPAC (export, plan, deploy, update, delete) except
+compliance results, which need real resources under the scope.
+
 Both environments use `ownedOnly`, which is EPAC's recommended starting point for an existing estate.
+With `ownedOnly` plus a root scope that doesn't contain the subscription, EPAC can't touch the production app.
 
 ## Files
 
@@ -94,7 +101,9 @@ so step 1 covers this in the sandbox.
 
 > If step 1 fails with `AuthorizationFailed` on management groups: in the portal go to
 > **Microsoft Entra ID → Properties → Access management for Azure resources = Yes**, then sign out
-> and back in (`Connect-AzAccount`) and re-run. This is a one-off for a personal tenant.
+> and back in (`Connect-AzAccount`) and re-run. **Set it back to No straight afterwards.** You keep
+> Owner on the management groups you created, and elevated access covers everything in the tenant,
+> production included.
 
 ### 1. Create the fake existing estate (sandbox only)
 
@@ -134,7 +143,7 @@ Copy-Item .\Output\export\Definitions\* .\Definitions\ -Recurse -Force
 
 You should now have:
 - `policyDefinitions\Tags\legacy-audit-rg-environment-tag.jsonc`
-- one assignment file for the custom definition and one for *Allowed locations*
+- one assignment file for the custom definition and one for *Storage accounts should prevent shared key access*
 
 The exact names come from EPAC.
 
@@ -184,8 +193,8 @@ From now on the files in git are the source of truth for these policies.
 
 Try one of these to watch the cycle work. Each time, edit a file, then Build → read the plan →
 Deploy, first to `epac-dev`, then to `tenant`.
-- Add `australiacentral` to the allowed locations parameter in the assignment file
-- Change the custom definition's effect to `deny` (Terraform-sandbox RG needs an `Environment` tag first!)
+- Change the shared-key assignment's `effect` parameter from `Audit` to `Disabled`
+- Change the custom definition's display name or description
 - Delete an assignment file. Under `ownedOnly`, EPAC deletes it in Azure because EPAC owns it now
 
 ### 8. Clean up (sandbox only)

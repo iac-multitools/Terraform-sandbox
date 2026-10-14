@@ -4,14 +4,11 @@
 
 .DESCRIPTION
     Deletes every policy assignment and custom policy/policy set definition at both sandbox
-    management groups (including any that EPAC deployed), moves the subscription back to the
-    Tenant Root Group, and deletes the two management groups.
+    management groups (including any that EPAC deployed), then deletes the two management groups.
+    Touches nothing outside mg-landgate-sim and mg-epac-dev.
 #>
-[CmdletBinding(SupportsShouldProcess)]
-param(
-    [string] $SubscriptionId = 'e0e05915-ccc9-4b6d-a340-25412753cd66',
-    [string] $TenantId       = '1f5b14c6-0cbf-4012-931f-a1d26bcf0b3a'
-)
+[CmdletBinding()]
+param()
 $ErrorActionPreference = 'Stop'
 
 foreach ($mg in 'mg-landgate-sim', 'mg-epac-dev') {
@@ -32,9 +29,6 @@ foreach ($mg in 'mg-landgate-sim', 'mg-epac-dev') {
         Remove-AzPolicyDefinition -Id $_.Id -Force | Out-Null
     }
 }
-
-Write-Host "Moving subscription back to the Tenant Root Group"
-New-AzManagementGroupSubscription -GroupName $TenantId -SubscriptionId $SubscriptionId
 
 foreach ($mg in 'mg-landgate-sim', 'mg-epac-dev') {
     if (Get-AzManagementGroup -GroupName $mg -ErrorAction SilentlyContinue) {
