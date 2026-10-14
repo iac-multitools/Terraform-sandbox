@@ -4,9 +4,9 @@ A plain, by-the-book [Enterprise Policy as Code (EPAC)](https://azure.github.io/
 deployment, run in a personal Pay-As-You-Go subscription. It follows the same steps Landgate
 will use: **export the existing policies first, then bring them under EPAC.**
 
-Nothing here is customised. It uses the `EnterprisePolicyAsCode` PowerShell module, its standard
-folder layout, and its standard commands. Only the `sandbox/` scripts are extra. They fake an
-"existing estate" so the export step has something to export.
+Nothing here is customised. It uses only the `EnterprisePolicyAsCode` PowerShell module, its
+standard folder layout, and its standard commands. The "existing estate" to export is made by hand
+in the portal (step 1).
 
 ## What EPAC is
 
@@ -60,7 +60,7 @@ and runs the same Build → Deploy commands as below.
 Tenant Root Group
 ├── Pay-As-You-Go subscription   NOT moved; it runs a production app
 ├── mg-landgate-sim              pacSelector "tenant"    stands in for the Landgate hierarchy
-│                                                          + hand-made "legacy" policies to export
+│                                                          + one hand-made assignment to export
 └── mg-epac-dev                  pacSelector "epac-dev"  test hierarchy, as EPAC recommends
 ```
 
@@ -79,8 +79,6 @@ With `ownedOnly` plus a root scope that doesn't contain the subscription, EPAC c
 | `Definitions/global-settings.jsonc` | The two PAC environments above |
 | `Definitions/policy*/` | Policy files. Empty until the export step fills them |
 | `Output/` | EPAC export and plan output. Regenerated each run (gitignored) |
-| `sandbox/New-SandboxBrownfield.ps1` | **Sandbox only.** Creates the management groups and the "legacy" policies |
-| `sandbox/Remove-Sandbox.ps1` | **Sandbox only.** Removes all of it again |
 
 ## Walkthrough
 
@@ -97,23 +95,33 @@ Connect-AzAccount -Tenant 1f5b14c6-0cbf-4012-931f-a1d26bcf0b3a
 
 Permissions EPAC needs at the deploymentRootScope: **Resource Policy Contributor** and
 **Role Based Access Control Administrator**. Whoever creates a management group gets Owner on it,
-so step 1 covers this in the sandbox.
+so step 1 covers this.
 
-> If step 1 fails with `AuthorizationFailed` on management groups: in the portal go to
-> **Microsoft Entra ID → Properties → Access management for Azure resources = Yes**, then sign out
-> and back in (`Connect-AzAccount`) and re-run. **Set it back to No straight afterwards.** You keep
+> If you can't create management groups in step 1: in the portal go to
+> **Microsoft Entra ID → Properties → Access management for Azure resources = Yes**, refresh, and
+> try again. **Set it back to No straight afterwards.** You keep
 > Owner on the management groups you created, and elevated access covers everything in the tenant,
 > production included.
 
-### 1. Create the fake existing estate (sandbox only)
+### 1. Create the "existing estate" in the portal (sandbox only)
+
+Landgate already has this, so this step is skipped there.
+
+1. **Management groups → + Create**, twice. Leave the parent as Tenant Root Group and add no
+   subscriptions. The IDs must match `global-settings.jsonc` exactly:
+   - ID `mg-landgate-sim`
+   - ID `mg-epac-dev`
+2. **Policy → Assignments → Assign policy**, the way policy gets made before EPAC:
+   - Scope: `mg-landgate-sim`
+   - Policy definition: built-in *Storage accounts should prevent shared key access*
+   - Parameters: Effect = `Audit`
+   - Leave everything else at its defaults and create it.
+
+Then, in `pwsh`:
 
 ```powershell
 cd epac
-.\sandbox\New-SandboxBrownfield.ps1
 ```
-
-Check in the portal (**Policy → Assignments**, scope `mg-landgate-sim`) that the two `legacy-*`
-assignments exist. Landgate already has this, so this step is skipped there.
 
 ### 2. Point EPAC at the folders
 
@@ -141,16 +149,13 @@ Review the output, then copy it into the real definitions folder:
 Copy-Item .\Output\export\Definitions\* .\Definitions\ -Recurse -Force
 ```
 
-You should now have:
-- `policyDefinitions\Tags\legacy-audit-rg-environment-tag.jsonc`
-- one assignment file for the custom definition and one for *Storage accounts should prevent shared key access*
-
-The exact names come from EPAC.
+You should now have one file under `policyAssignments\` for the *shared key access* assignment.
+EPAC picks the file name.
 
 ### 4. Add the dev scope to the assignments
 
 The exported assignment files only have a `scope` for `tenant`, because that's where they were
-found. To test them in `epac-dev` first, add a line to each file's `scope` block:
+found. To test in `epac-dev` first, add a line to the file's `scope` block:
 
 ```jsonc
 "scope": {
@@ -159,7 +164,8 @@ found. To test them in `epac-dev` first, add a line to each file's `scope` block
 }
 ```
 
-Custom definitions need no change. EPAC deploys them to every environment's root automatically.
+(Custom definitions, which Landgate will have, need no change. EPAC deploys them to every
+environment's root automatically.)
 
 ### 5. Deploy to epac-dev
 
@@ -169,7 +175,7 @@ Deploy-PolicyPlan     -PacEnvironmentSelector epac-dev
 Deploy-RolesPlan      -PacEnvironmentSelector epac-dev   # nothing to do here: no DINE/Modify policies
 ```
 
-Check that the definition and assignments appear at `mg-epac-dev`. Run `Build-DeploymentPlans`
+Check that the assignment appears at `mg-epac-dev`. Run `Build-DeploymentPlans`
 again and it should report **no changes**, which proves the files and Azure now match.
 
 ### 6. Take over production (tenant)
@@ -178,8 +184,8 @@ again and it should report **no changes**, which proves the files and Azure now 
 Build-DeploymentPlans -PacEnvironmentSelector tenant
 ```
 
-**This is the plan to read carefully.** The resources already exist with the same names, so
-expect *updates* (EPAC stamping its `pacOwnerId` metadata on them). You should see **no deletes and
+**This is the plan to read carefully.** The assignment already exists with the same name, so
+expect an *update* (EPAC stamping its `pacOwnerId` metadata on it). You should see **no deletes and
 no replacements**. If you see either, stop and find out why before deploying.
 
 ```powershell
@@ -187,21 +193,22 @@ Deploy-PolicyPlan -PacEnvironmentSelector tenant
 Deploy-RolesPlan  -PacEnvironmentSelector tenant
 ```
 
-From now on the files in git are the source of truth for these policies.
+From now on the file in git is the source of truth for this assignment.
 
 ### 7. Make a change the EPAC way
 
 Try one of these to watch the cycle work. Each time, edit a file, then Build → read the plan →
 Deploy, first to `epac-dev`, then to `tenant`.
-- Change the shared-key assignment's `effect` parameter from `Audit` to `Disabled`
-- Change the custom definition's display name or description
-- Delete an assignment file. Under `ownedOnly`, EPAC deletes it in Azure because EPAC owns it now
+- Change the assignment's `effect` parameter from `Audit` to `Disabled`
+- Change its display name
+- Copy the file, then give the copy a different assignment `name` and a different built-in policy.
+  That creates a new assignment
 
 ### 8. Clean up (sandbox only)
 
-```powershell
-.\sandbox\Remove-Sandbox.ps1
-```
+Use EPAC itself. Delete the files in `Definitions\policyAssignments\`, then Build → Deploy for
+`epac-dev` and `tenant`. Under `ownedOnly`, EPAC removes the assignments it now owns. Then delete
+the two management groups in the portal.
 
 ## Notes to carry into the Landgate scoping
 
