@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Azure/enterprise-azure-policy-as-code/main/Schemas/policy-assignment-schema.json",
+  "nodeName": "/root",
+  "definitionEntry": {
+    "policyId": "/providers/Microsoft.Authorization/policyDefinitions/05f95bb8-8ef8-4cef-8cad-5d30f9912850",
+    "displayName": "Storage accounts should prevent shared key access (excluding storage accounts managed by Azure Red Hat OpenShift)"
+  },
+  "assignment": {
+    "name": "daa6e1abdf415f94b026e06d",
+    "displayName": "Storage accounts should prevent shared key access (excluding storage accounts managed by Azure Red Hat OpenShift)",
+    "description": ""
+  },
+  "metadata": {
+    "parameterScopes": {}
+  },
+  "overrides": [],
+  "resourceSelectors": [],
+  "scope": {
+    "epac-dev": [
+      "/providers/Microsoft.Management/managementGroups/mg-epac-dev"
+    ],
+    "tenant": [
+      "/providers/Microsoft.Management/managementGroups/mg-landgate-sim"
+    ]
+  },
+  "definitionVersion": "1.*.*"
+}
