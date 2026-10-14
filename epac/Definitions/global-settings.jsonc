@@ -1,0 +1,33 @@
+{
+    "$schema": "https://raw.githubusercontent.com/Azure/enterprise-azure-policy-as-code/main/Schemas/global-settings-schema.json",
+
+    // Identifies policy resources deployed from THIS repo. Generate once, never change.
+    "pacOwnerId": "dc174f21-0726-4436-a338-0ea8f7cabbe5",
+
+    "pacEnvironments": [
+        {
+            // Test environment: an empty management group, separate from (not nested in) the real hierarchy.
+            "pacSelector": "epac-dev",
+            "cloud": "AzureCloud",
+            "tenantId": "1f5b14c6-0cbf-4012-931f-a1d26bcf0b3a",
+            "deploymentRootScope": "/providers/Microsoft.Management/managementGroups/mg-epac-dev",
+            "desiredState": {
+                "strategy": "ownedOnly",
+                "keepDfcSecurityAssignments": false
+            },
+            "managedIdentityLocation": "australiaeast"
+        },
+        {
+            // "Production": stands in for the Landgate hierarchy. Holds the subscription and the pre-EPAC policies.
+            "pacSelector": "tenant",
+            "cloud": "AzureCloud",
+            "tenantId": "1f5b14c6-0cbf-4012-931f-a1d26bcf0b3a",
+            "deploymentRootScope": "/providers/Microsoft.Management/managementGroups/mg-landgate-sim",
+            "desiredState": {
+                "strategy": "ownedOnly",
+                "keepDfcSecurityAssignments": false
+            },
+            "managedIdentityLocation": "australiaeast"
+        }
+    ]
+}

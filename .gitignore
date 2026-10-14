@@ -23,3 +23,6 @@ override.tf.json
 *-ssh.pub
 id_rsa*
 id_ed25519*
+
+# EPAC plan/export output (regenerated every run)
+epac/Output/
