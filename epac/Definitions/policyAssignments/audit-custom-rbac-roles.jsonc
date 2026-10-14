@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Azure/enterprise-azure-policy-as-code/main/Schemas/policy-assignment-schema.json",
+  "nodeName": "/root",
+  "definitionEntry": {
+    "policyId": "/providers/Microsoft.Authorization/policyDefinitions/a451c1ef-c6ca-483d-87ed-f49761e3ffb5",
+    "displayName": "Audit usage of custom RBAC roles"
+  },
+  "assignment": {
+    "name": "audit-custom-rbac-roles",
+    "displayName": "Audit usage of custom RBAC roles",
+    "description": "Created with EPAC (not exported)."
+  },
+  "scope": {
+    "epac-dev": [
+      "/providers/Microsoft.Management/managementGroups/mg-epac-dev"
+    ],
+    "tenant": [
+      "/providers/Microsoft.Management/managementGroups/mg-landgate-sim"
+    ]
+  }
+}
